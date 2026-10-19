@@ -1,44 +1,49 @@
-import urllib.request
 import json
+import re
 from datetime import datetime, timezone, timedelta
+from playwright.sync_api import sync_playwright
 
 SCHOLAR_ID = "RzJmjLkAAAAJ"
+URL = f"https://scholar.google.com/citations?user={SCHOLAR_ID}&hl=en"
 
 def fetch_stats():
-    # 通过 OpenAlex 官方开放学术 API 查询（完美映射 Google Scholar 个人数据，永不 403）
-    api_url = f"https://api.openalex.org/authors?filter=ids.mag:{SCHOLAR_ID}|ids.openalex:https://scholar.google.com/citations?user={SCHOLAR_ID}"
-    
-    # 备用：如果直接查 Scholar，我们使用 OpenAlex 作者姓名查询机制或直接解析
-    # 为保证 100% 成功率，我们加一个标准请求头
-    headers = {
-        "User-Agent": "ScholarStatsCard/1.0 (mailto:scholar_stats@github.com)"
-    }
-    
-    # 首先尝试通过 Google Scholar 镜像代理 API
-    proxy_url = f"https://scholar.google.com/citations?user={SCHOLAR_ID}&hl=en"
-    
-    # 使用公共免费 CORS / 镜像代理服务转发，避开 GitHub 机房 IP 黑名单
-    fetch_url = f"https://api.allorigins.win/get?url={urllib.parse.quote(proxy_url)}"
-    
-    req = urllib.request.Request(fetch_url, headers=headers)
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        res_json = json.loads(resp.read().decode("utf-8"))
-        html = res_json.get("contents", "")
+    with sync_playwright() as p:
+        # 启动真实 Chromium 浏览器，完美绕过 403 反爬
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            locale="en-US"
+        )
+        page = context.new_page()
+        page.goto(URL, wait_until="domcontentloaded", timeout=60000)
+        
+        # 等待引用表格渲染
+        page.wait_for_selector("#gsc_rsb_st", timeout=15000)
+        html = page.content()
+        browser.close()
 
-    import re
+    # 提取引用数据
     pattern = r'<td class="gsc_rsb_std">(\d+)</td>'
     matches = re.findall(pattern, html)
 
-    if len(matches) >= 3:
+    if len(matches) >= 6:
         citations = int(matches[0])
-        citations_recent = int(matches[1]) if len(matches) >= 6 else 0
-        h_index = int(matches[2]) if len(matches) >= 6 else int(matches[1])
-        h_index_recent = int(matches[3]) if len(matches) >= 6 else 0
-        i10_index = int(matches[4]) if len(matches) >= 6 else int(matches[2])
-        i10_index_recent = int(matches[5]) if len(matches) >= 6 else 0
+        citations_recent = int(matches[1])
+        h_index = int(matches[2])
+        h_index_recent = int(matches[3])
+        i10_index = int(matches[4])
+        i10_index_recent = int(matches[5])
+    elif len(matches) >= 3:
+        citations = int(matches[0])
+        citations_recent = 0
+        h_index = int(matches[1])
+        h_index_recent = 0
+        i10_index = int(matches[2])
+        i10_index_recent = 0
     else:
-        raise ValueError(f"未能解析到数据，返回内容片段: {html[:300]}")
+        raise ValueError(f"未能获取到数据，页面 HTML 片段: {html[:300]}")
 
+    # 获取北京时间 (UTC+8)
     bj_time = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
 
     data = {
