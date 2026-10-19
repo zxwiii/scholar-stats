@@ -20,6 +20,9 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install dependencies
+        run: pip install curl_cffi
+
       - name: Run update.py
         run: python update.py
 
