@@ -2,9 +2,7 @@ name: Update Scholar Stats
 
 on:
   schedule:
-    # 每天 UTC 时间 20:00 (即北京时间每天凌晨 04:00) 自动运行
     - cron: '0 20 * * *'
-  # 允许你在网页上手动点击按钮立即运行测试
   workflow_dispatch:
 
 permissions:
