@@ -1,26 +1,21 @@
-import urllib.request
 import json
 import re
 from datetime import datetime, timezone, timedelta
+from curl_cffi import requests
 
-# Google Scholar ID
 SCHOLAR_ID = "RzJmjLkAAAAJ"
 URL = f"https://scholar.google.com/citations?user={SCHOLAR_ID}&hl=en"
 
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-}
-
 def fetch_stats():
-    req = urllib.request.Request(URL, headers=headers)
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        html = resp.read().decode("utf-8")
+    # 模拟真实 Chrome 浏览器指纹，完美解决 403 Forbidden
+    response = requests.get(URL, impersonate="chrome120", timeout=30)
+    
+    if response.status_code != 200:
+        raise ValueError(f"HTTP 请求失败，状态码: {response.status_code}")
+        
+    html = response.text
 
-    # 匹配右侧引用统计表格中的数字
-    # Google Scholar 表格格式一般为:
-    # Citations: All, Since 20XX
-    # h-index: All, Since 20XX
-    # i10-index: All, Since 20XX
+    # 提取总引用、h-index、i10-index
     pattern = r'<td class="gsc_rsb_std">(\d+)</td>'
     matches = re.findall(pattern, html)
 
@@ -39,9 +34,9 @@ def fetch_stats():
         i10_index = int(matches[2])
         i10_index_recent = 0
     else:
-        raise ValueError(f"无法匹配到统计数据，HTML格式可能变更。提取到的内容: {matches}")
+        raise ValueError(f"无法匹配到统计数据，HTML 内容可能有变。")
 
-    # 获取北京时间 (UTC+8)
+    # 北京时间 (UTC+8)
     bj_time = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
 
     data = {
@@ -55,7 +50,6 @@ def fetch_stats():
         "updated_at": bj_time
     }
 
-    # 保存为 scholar.json
     with open("scholar.json", "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
