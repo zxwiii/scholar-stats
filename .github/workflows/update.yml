@@ -2,6 +2,7 @@ name: Update Scholar Stats
 
 on:
   schedule:
+    # 每天北京时间凌晨 04:00 (UTC 20:00) 自动执行
     - cron: '0 20 * * *'
   workflow_dispatch:
 
@@ -20,12 +21,9 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Playwright
-        run: |
-          pip install playwright
-          playwright install --with-deps chromium
-
-      - name: Run update.py
+      - name: Run update.py with SerpApi
+        env:
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
         run: python update.py
 
       - name: Commit and Push
