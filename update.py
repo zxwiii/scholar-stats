@@ -1,79 +1,64 @@
+import os
 import json
-import re
-import time
+import urllib.request
 from datetime import datetime, timezone, timedelta
-from playwright.sync_api import sync_playwright
 
 SCHOLAR_ID = "RzJmjLkAAAAJ"
-URL = f"https://scholar.google.com/citations?user={SCHOLAR_ID}&hl=en"
+API_KEY = os.environ.get("SERPAPI_KEY")
 
 def fetch_stats():
-    data = None
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-dev-shm-usage"
-            ]
-        )
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            locale="en-US"
-        )
-        
-        # 预先注入已同意 Google 隐私政策的 Cookie，杜绝所有 Consent 弹窗和拦截
-        context.add_cookies([
-            {"name": "CONSENT", "value": "YES+cb.20230531-04-p0.en+FX+999", "domain": ".google.com", "path": "/"},
-            {"name": "SOCS", "value": "CAISHAgBEhJnd3NfMjAyMzA4MTAtMF9SQzIaAmVuIAEaBgiA_LmmBg", "domain": ".google.com", "path": "/"}
-        ])
-        
-        page = context.new_page()
-        
-        print("正在打开 Google Scholar 页面...")
-        page.goto(URL, wait_until="domcontentloaded", timeout=40000)
-        
-        print("当前页面标题:", page.title())
-        print("当前页面URL:", page.url)
-        
-        # 等待页面渲染出数据
-        page.wait_for_timeout(3000)
-        html = page.content()
-        browser.close()
+    if not API_KEY:
+        raise ValueError("未检测到环境变量 SERPAPI_KEY，请检查仓库 Secrets 配置！")
 
-    # 提取数字
-    pattern = r'<td class="gsc_rsb_std">(\d+)</td>'
-    matches = re.findall(pattern, html)
-    print("匹配到的统计结果:", matches)
+    # SerpApi 官方 Google Scholar Author API 接口
+    api_url = f"https://serpapi.com/search.json?engine=google_scholar_author&author_id={SCHOLAR_ID}&api_key={API_KEY}&hl=en"
 
-    if len(matches) >= 3:
-        citations = int(matches[0])
-        citations_recent = int(matches[1]) if len(matches) >= 6 else 0
-        h_index = int(matches[2]) if len(matches) >= 6 else int(matches[1])
-        h_index_recent = int(matches[3]) if len(matches) >= 6 else 0
-        i10_index = int(matches[4]) if len(matches) >= 6 else int(matches[2])
-        i10_index_recent = int(matches[5]) if len(matches) >= 6 else 0
+    print("正在通过 SerpApi 官方通道获取学术数据...")
+    req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
+    
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        result = json.loads(resp.read().decode("utf-8"))
 
-        bj_time = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
-        data = {
-            "scholar_id": SCHOLAR_ID,
-            "citations": citations,
-            "citations_recent": citations_recent,
-            "h_index": h_index,
-            "h_index_recent": h_index_recent,
-            "i10_index": i10_index,
-            "i10_index_recent": i10_index_recent,
-            "updated_at": bj_time
-        }
-    else:
-        # 如果未匹配到，打印出前 500 个字符方便看原因
-        print("HTML内容片段:", html[:500])
-        raise RuntimeError(f"未能匹配到统计数据，页面标题: {page.title() if 'page' in locals() else '未知'}")
+    # 从返回的 JSON 中提取引用指标表格
+    cited_by_table = result.get("cited_by", {}).get("table", [])
+    
+    citations = 0
+    citations_recent = 0
+    h_index = 0
+    h_index_recent = 0
+    i10_index = 0
+    i10_index_recent = 0
 
+    for row in cited_by_table:
+        if "citations" in row:
+            citations = int(row["citations"].get("all", 0))
+            citations_recent = int(row["citations"].get("since_2021", 0) or row["citations"].get("since_2020", 0) or list(row["citations"].values())[1] if len(row["citations"]) > 1 else 0)
+        elif "h_index" in row:
+            h_index = int(row["h_index"].get("all", 0))
+            h_index_recent = int(row["h_index"].get("since_2021", 0) or row["h_index"].get("since_2020", 0) or list(row["h_index"].values())[1] if len(row["h_index"]) > 1 else 0)
+        elif "i10_index" in row:
+            i10_index = int(row["i10_index"].get("all", 0))
+            i10_index_recent = int(row["i10_index"].get("since_2021", 0) or row["i10_index"].get("since_2020", 0) or list(row["i10_index"].values())[1] if len(row["i10_index"]) > 1 else 0)
+
+    # 获取北京时间 (UTC+8)
+    bj_time = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+
+    data = {
+        "scholar_id": SCHOLAR_ID,
+        "citations": citations,
+        "citations_recent": citations_recent,
+        "h_index": h_index,
+        "h_index_recent": h_index_recent,
+        "i10_index": i10_index,
+        "i10_index_recent": i10_index_recent,
+        "updated_at": bj_time
+    }
+
+    print("成功解析到最新学术数据：", data)
+
+    # 写入文件
     with open("scholar.json", "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    print("写入成功！新数据：", data)
 
 if __name__ == "__main__":
     fetch_stats()
